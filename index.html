@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Cyrillic Detector</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #0078d4;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .alert {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .safe {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .btn {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        .btn:hover {
+            background-color: #106ebe;
+        }
+        .details {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .cyrillic-text {
+            font-weight: bold;
+            color: #d73527;
+            background-color: #fff5f5;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        .toggle-details {
+            font-size: 12px;
+            color: #0078d4;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Cyrillic Character Detector</h1>
+        
+        <button class="btn" onclick="scanCurrentEmail()">Scan Current Email</button>
+        <button class="btn" onclick="toggleAutoScan()">Toggle Auto-Scan</button>
+        
+        <div id="status" class="status" style="display: none;"></div>
+        <div id="details" class="details" style="display: none;"></div>
+        
+        <div style="margin-top: 20px; font-size: 12px; color: #666;">
+            <strong>Auto-scan status:</strong> <span id="autoScanStatus">Disabled</span>
+        </div>
+    </div>
+
+    <script>
+        let autoScanEnabled = false;
+        let currentMailbox = null;
+
+        // Initialize the add-in
+        Office.onReady((info) => {
+            if (info.host === Office.HostType.Outlook) {
+                console.log('Cyrillic Detector Add-in loaded');
+                
+                // Set up event handlers for new emails
+                if (Office.context.mailbox.item) {
+                    setupEventHandlers();
+                }
+            }
+        });
+
+        function setupEventHandlers() {
+            // Listen for item changes (new emails)
+            if (Office.context.mailbox.addHandlerAsync) {
+                Office.context.mailbox.addHandlerAsync(
+                    Office.EventType.ItemChanged,
+                    onItemChanged
+                );
+            }
+        }
+
+        function onItemChanged(eventArgs) {
+            if (autoScanEnabled) {
+                setTimeout(() => scanCurrentEmail(), 1000);
+            }
+        }
+
+        function hasCyrillicCharacters(text) {
+            // Cyrillic Unicode ranges:
+            // U+0400-U+04FF (Cyrillic)
+            // U+0500-U+052F (Cyrillic Supplement)
+            // U+2DE0-U+2DFF (Cyrillic Extended-A)
+            // U+A640-U+A69F (Cyrillic Extended-B)
+            const cyrillicRegex = /[\u0400-\u04FF\u0500-\u052F\u2DE0-\u2DFF\uA640-\uA69F]/;
+            return cyrillicRegex.test(text);
+        }
+
+        function extractCyrillicText(text) {
+            const cyrillicRegex = /[\u0400-\u04FF\u0500-\u052F\u2DE0-\u2DFF\uA640-\uA69F]+/g;
+            return text.match(cyrillicRegex) || [];
+        }
+
+        function scanCurrentEmail() {
+            const statusDiv = document.getElementById('status');
+            const detailsDiv = document.getElementById('details');
+            
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'status';
+            statusDiv.innerHTML = 'Scanning...';
+            detailsDiv.style.display = 'none';
+
+            if (!Office.context.mailbox.item) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = 'No email selected';
+                return;
+            }
+
+            const item = Office.context.mailbox.item;
+            let hasFoundCyrillic = false;
+            let detectedText = [];
+            let scanResults = {
+                subject: false,
+                sender: false,
+                body: false,
+                cyrillicStrings: []
+            };
+
+            // Check subject
+            if (item.subject && hasCyrillicCharacters(item.subject)) {
+                hasFoundCyrillic = true;
+                scanResults.subject = true;
+                detectedText.push(`Subject: ${item.subject}`);
+                scanResults.cyrillicStrings.push(...extractCyrillicText(item.subject));
+            }
+
+            // Check sender
+            if (item.sender && item.sender.displayName && hasCyrillicCharacters(item.sender.displayName)) {
+                hasFoundCyrillic = true;
+                scanResults.sender = true;
+                detectedText.push(`Sender: ${item.sender.displayName}`);
+                scanResults.cyrillicStrings.push(...extractCyrillicText(item.sender.displayName));
+            }
+
+            // Check body
+            if (item.body) {
+                item.body.getAsync(Office.CoercionType.Text, (result) => {
+                    if (result.status === Office.AsyncResultStatus.Succeeded) {
+                        const bodyText = result.value;
+                        
+                        if (hasCyrillicCharacters(bodyText)) {
+                            hasFoundCyrillic = true;
+                            scanResults.body = true;
+                            scanResults.cyrillicStrings.push(...extractCyrillicText(bodyText));
+                        }
+
+                        // Display results
+                        displayResults(hasFoundCyrillic, scanResults, detectedText);
+                    } else {
+                        // Display results without body check
+                        displayResults(hasFoundCyrillic, scanResults, detectedText);
+                    }
+                });
+            } else {
+                // Display results without body check
+                displayResults(hasFoundCyrillic, scanResults, detectedText);
+            }
+        }
+
+        function displayResults(hasFoundCyrillic, scanResults, detectedText) {
+            const statusDiv = document.getElementById('status');
+            const detailsDiv = document.getElementById('details');
+
+            if (hasFoundCyrillic) {
+                statusDiv.className = 'status alert';
+                statusDiv.innerHTML = '⚠️ CYRILLIC CHARACTERS DETECTED!';
+                
+                let detailsHTML = '<strong>Detection Details:</strong><br>';
+                
+                if (scanResults.subject) detailsHTML += '• Subject contains Cyrillic<br>';
+                if (scanResults.sender) detailsHTML += '• Sender name contains Cyrillic<br>';
+                if (scanResults.body) detailsHTML += '• Email body contains Cyrillic<br>';
+                
+                if (scanResults.cyrillicStrings.length > 0) {
+                    detailsHTML += '<br><strong>Detected Cyrillic text:</strong><br>';
+                    const uniqueStrings = [...new Set(scanResults.cyrillicStrings)];
+                    uniqueStrings.slice(0, 10).forEach(str => {
+                        detailsHTML += `<span class="cyrillic-text">${str}</span><br>`;
+                    });
+                    if (uniqueStrings.length > 10) {
+                        detailsHTML += `<em>... and ${uniqueStrings.length - 10} more</em><br>`;
+                    }
+                }
+                
+                detailsDiv.innerHTML = detailsHTML;
+                detailsDiv.style.display = 'block';
+                
+                // Show notification
+                if (Office.context.mailbox.item.notificationMessages) {
+                    Office.context.mailbox.item.notificationMessages.addAsync(
+                        'cyrillicWarning',
+                        {
+                            type: 'errorMessage',
+                            message: 'This email contains Cyrillic characters - please verify sender authenticity'
+                        }
+                    );
+                }
+                
+            } else {
+                statusDiv.className = 'status safe';
+                statusDiv.innerHTML = '✅ No Cyrillic characters detected';
+                detailsDiv.style.display = 'none';
+            }
+        }
+
+        function toggleAutoScan() {
+            autoScanEnabled = !autoScanEnabled;
+            const statusSpan = document.getElementById('autoScanStatus');
+            statusSpan.textContent = autoScanEnabled ? 'Enabled' : 'Disabled';
+            statusSpan.style.color = autoScanEnabled ? '#28a745' : '#dc3545';
+            
+            if (autoScanEnabled) {
+                scanCurrentEmail();
+            }
+        }
+
+        // Auto-scan on email selection change
+        Office.onReady(() => {
+            if (Office.context.mailbox.item) {
+                // Initial scan if auto-scan is enabled
+                if (autoScanEnabled) {
+                    setTimeout(() => scanCurrentEmail(), 500);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
